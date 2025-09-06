@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Pemisah Segmen SRT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0c10;
+            color: #cbd5e1;
+        }
+        .container-card {
+            background-color: #1f2937;
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.4), 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 1s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .timecode-editable {
+            cursor: pointer;
+            border-bottom: 1px dashed #4a5568;
+        }
+    </style>
+</head>
+<body class="p-6 md:p-12 flex items-center justify-center min-h-screen">
+    <div class="container-card p-8 md:p-10 rounded-xl w-full max-w-3xl">
+        <h1 class="text-3xl md:text-4xl font-bold text-center text-indigo-400 mb-2">Pemisah Segmen SRT Otomatis</h1>
+        <p class="text-center text-gray-400 mb-8">Tempelkan teks SRT Anda di bawah dan klik "Proses" untuk memecahnya.</p>
+        
+        <div class="flex flex-col gap-6">
+            <div>
+                <label for="srtInput" class="block text-sm font-medium text-gray-300 mb-2">Teks SRT Anda</label>
+                <textarea id="srtInput" rows="10" class="w-full p-4 rounded-lg border-2 border-gray-600 bg-gray-800 text-gray-100 focus:outline-none focus:border-indigo-500 transition-colors duration-200" placeholder="Tempelkan konten file .srt di sini..."></textarea>
+            </div>
+            
+            <button id="processBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50">
+                Proses
+            </button>
+            
+            <div id="outputContainer" class="hidden">
+                <div id="srtOutput" class="w-full p-4 rounded-lg border-2 border-gray-600 bg-gray-900 text-gray-100 min-h-[200px] overflow-auto"></div>
+                <div class="flex flex-col md:flex-row justify-between gap-4 mt-4">
+                    <button id="editBtn" class="w-full md:w-1/2 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                        Edit Teks
+                    </button>
+                    <button id="copyBtn" class="w-full md:w-1/2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-opacity-50">
+                        Salin Hasil
+                    </button>
+                </div>
+            </div>
+            <div id="messageBox" class="text-center text-sm font-medium mt-4 p-2 rounded-lg transition-all duration-300"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('processBtn').addEventListener('click', processSrt);
+        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
+        document.getElementById('editBtn').addEventListener('click', toggleEditMode);
+
+        function showMessage(text, isError = false) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.textContent = text;
+            if (isError) {
+                messageBox.className = 'text-center text-sm font-medium mt-4 p-2 rounded-lg transition-all duration-300 bg-red-800 text-red-300 border border-red-600';
+            } else {
+                messageBox.className = 'text-center text-sm font-medium mt-4 p-2 rounded-lg transition-all duration-300 bg-indigo-800 text-indigo-300 border border-indigo-600';
+            }
+            setTimeout(() => {
+                messageBox.textContent = '';
+                messageBox.className = 'transition-all duration-300';
+            }, 3000);
+        }
+
+        function processSrt() {
+            const input = document.getElementById('srtInput').value.trim();
+            if (!input) {
+                showMessage("Mohon tempelkan teks SRT terlebih dahulu.", true);
+                return;
+            }
+
+            const segments = input.split(/\r?\n\r?\n/);
+            const outputContainer = document.getElementById('srtOutput');
+            outputContainer.innerHTML = '';
+            let newSegmentNumber = 1;
+
+            segments.forEach(segment => {
+                const lines = segment.split(/\r?\n/);
+                if (lines.length < 2) return;
+
+                const timecode = lines[1];
+                const text = lines.slice(2).join(' ');
+
+                const sentences = text.split(/(?<=\.)\s*/).filter(s => s.trim() !== '');
+
+                if (sentences.length > 0) {
+                    sentences.forEach((sentence) => {
+                        const [startTime, endTime] = timecode.split(' --> ');
+                        const [startH, startM, startS, startMs] = parseTimecodeToUnits(startTime);
+                        const [endH, endM, endS, endMs] = parseTimecodeToUnits(endTime);
+                        
+                        const segmentDiv = document.createElement('div');
+                        segmentDiv.className = 'mb-6 p-4 rounded-lg bg-gray-800 border border-gray-700';
+                        segmentDiv.id = `segment-${newSegmentNumber}`;
+
+                        segmentDiv.innerHTML = `
+                            <p class="font-bold text-gray-300 mb-1">${newSegmentNumber}</p>
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-gray-400">Mulai:</span>
+                                <span class="timecode-editable text-indigo-300" data-segment-id="${newSegmentNumber}" data-time-type="start">${startH}:${startM}:${startS},${startMs}</span>
+                            </div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-gray-400">Selesai:</span>
+                                <span class="timecode-editable text-indigo-300" data-segment-id="${newSegmentNumber}" data-time-type="end">${endH}:${endM}:${endS},${endMs}</span>
+                            </div>
+                            <div class="text-segment-content" contenteditable="false">${sentence.trim()}</div>
+                        `;
+                        outputContainer.appendChild(segmentDiv);
+                        newSegmentNumber++;
+                    });
+                }
+            });
+
+            document.getElementById('outputContainer').classList.remove('hidden');
+            setupTimecodeListeners();
+            showMessage("Teks berhasil diproses!");
+        }
+
+        function setupTimecodeListeners() {
+            document.querySelectorAll('.timecode-editable').forEach(span => {
+                span.addEventListener('click', handleTimecodeClick);
+            });
+        }
+
+        function handleTimecodeClick(event) {
+            const span = event.target;
+            const timecode = span.textContent;
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = timecode;
+            input.className = 'bg-gray-700 text-indigo-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+            
+            span.parentNode.replaceChild(input, span);
+            input.focus();
+            
+            input.addEventListener('blur', () => {
+                const newTimecode = input.value.trim();
+                const isValid = /^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/.test(newTimecode);
+                
+                if (isValid) {
+                    span.textContent = newTimecode;
+                } else {
+                    showMessage("Format waktu tidak valid. Gunakan format HH:MM:SS,MMM", true);
+                }
+                
+                input.parentNode.replaceChild(span, input);
+            });
+            
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    input.blur();
+                }
+            });
+        }
+
+        function parseTimecodeToUnits(timecode) {
+            const [time, ms] = timecode.split(',');
+            const [hours, minutes, seconds] = time.split(':').map(Number);
+            const pad = (num, size) => ('000' + num).slice(size * -1);
+            return [pad(hours, 2), pad(minutes, 2), pad(seconds, 2), pad(ms, 3)];
+        }
+
+        function copyToClipboard() {
+            const outputContainer = document.getElementById('srtOutput');
+            const segments = outputContainer.children;
+            if (segments.length === 0) {
+                showMessage("Tidak ada teks untuk disalin.", true);
+                return;
+            }
+
+            let srtContent = '';
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const segmentNumber = i + 1;
+                const startTime = segment.querySelector(`[data-time-type="start"]`).textContent;
+                const endTime = segment.querySelector(`[data-time-type="end"]`).textContent;
+                const text = segment.querySelector('.text-segment-content').innerText.trim();
+
+                srtContent += `${segmentNumber}\n`;
+                srtContent += `${startTime} --> ${endTime}\n`;
+                srtContent += `${text}\n\n`;
+            }
+
+            const tempTextarea = document.createElement('textarea');
+            tempTextarea.value = srtContent.trim();
+            document.body.appendChild(tempTextarea);
+            tempTextarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextarea);
+
+            showMessage("Berhasil disalin ke clipboard!");
+        }
+
+        function toggleEditMode() {
+            const editButton = document.getElementById('editBtn');
+            const textSegments = document.querySelectorAll('.text-segment-content');
+            const isEditable = textSegments[0]?.getAttribute('contenteditable') === 'true';
+
+            if (isEditable) {
+                textSegments.forEach(el => el.setAttribute('contenteditable', 'false'));
+                editButton.textContent = 'Edit Teks';
+                showMessage("Mode edit dinonaktifkan.");
+            } else {
+                textSegments.forEach(el => el.setAttribute('contenteditable', 'true'));
+                editButton.textContent = 'Selesai Edit';
+                showMessage("Mode edit teks diaktifkan. Anda bisa mengubah teks sekarang.");
+            }
+        }
+    </script>
+</body>
+</html>
